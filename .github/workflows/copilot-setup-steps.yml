@@ -1,0 +1,36 @@
+name: "Copilot Setup Steps"
+
+# Run the setup steps automatically when they change, so they can be validated,
+# and allow manual runs from the repository's "Actions" tab.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+
+jobs:
+  # The job MUST be called `copilot-setup-steps` or it will not be picked up by Copilot.
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # The CLI only uses Node.js built-ins, so there is nothing to install.
+      # Linking it makes `feishu ...` available on PATH for the whole session.
+      - name: Link the feishu CLI
+        run: npm link
+
+      - name: Verify the CLI runs
+        run: feishu help
