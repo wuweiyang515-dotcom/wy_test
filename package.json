@@ -1,0 +1,18 @@
+{
+  "name": "wy-feishu-cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Thin CLI wrapper around the Feishu/Lark open APIs: read, append to and create cloud documents from a share link.",
+  "type": "module",
+  "bin": {
+    "feishu": "./src/cli.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "node ./src/cli.js check"
+  },
+  "license": "MIT"
+}
