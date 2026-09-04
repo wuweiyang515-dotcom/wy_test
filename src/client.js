@@ -1,11 +1,48 @@
 /**
  * Minimal Feishu / Lark OpenAPI client.
  *
- * Only depends on the Node.js built-in `fetch`, so the CLI has no third-party
+ * Only depends on Node.js built-in modules, so the CLI has no third-party
  * runtime dependencies to install or keep up to date.
+ *
+ * `node:https` is used instead of the global `fetch`: some sandboxed
+ * environments proxy outbound traffic in a way that makes Feishu's CDN reject
+ * undici's requests with an HTML `400 Bad Request` page.
  */
 
+import https from 'node:https';
+import http from 'node:http';
+
 const DEFAULT_DOMAIN = 'https://open.feishu.cn';
+
+/**
+ * Perform an HTTP request and buffer the response as text.
+ *
+ * @param {URL} url
+ * @param {{ method: string, headers: Record<string, string>, body?: string }} options
+ * @returns {Promise<{ status: number, headers: Record<string, string | string[] | undefined>, text: string }>}
+ */
+function httpRequest(url, { method, headers, body }) {
+  const transport = url.protocol === 'http:' ? http : https;
+  return new Promise((resolve, reject) => {
+    const request = transport.request(
+      url,
+      { method, headers: { ...headers, Accept: 'application/json' } },
+      (response) => {
+        response.setEncoding('utf8');
+        let text = '';
+        response.on('data', (chunk) => {
+          text += chunk;
+        });
+        response.on('end', () => {
+          resolve({ status: response.statusCode ?? 0, headers: response.headers, text });
+        });
+      },
+    );
+    request.on('error', reject);
+    if (body !== undefined) request.write(body);
+    request.end();
+  });
+}
 
 export class FeishuError extends Error {
   constructor(message, { code, httpStatus, requestId } = {}) {
@@ -74,13 +111,14 @@ export class FeishuClient {
       headers.Authorization = ['Bearer', accessToken].join(' ');
     }
 
+    const payloadText = body === undefined ? undefined : JSON.stringify(body);
+    if (payloadText !== undefined) {
+      headers['Content-Length'] = String(Buffer.byteLength(payloadText));
+    }
+
     let response;
     try {
-      response = await fetch(url, {
-        method,
-        headers,
-        body: body === undefined ? undefined : JSON.stringify(body),
-      });
+      response = await httpRequest(url, { method, headers, body: payloadText });
     } catch (cause) {
       throw new FeishuError(
         `Network request to ${url.host} failed: ${cause.message}. ` +
@@ -89,8 +127,8 @@ export class FeishuClient {
       );
     }
 
-    const requestId = response.headers.get('x-tt-logid') ?? undefined;
-    const text = await response.text();
+    const requestId = response.headers['x-tt-logid'] ?? undefined;
+    const text = response.text;
     let payload;
     try {
       payload = JSON.parse(text);
@@ -101,9 +139,9 @@ export class FeishuClient {
       );
     }
 
-    if (!response.ok || (payload.code !== undefined && payload.code !== 0)) {
+    if (response.status >= 400 || (payload.code !== undefined && payload.code !== 0)) {
       throw new FeishuError(
-        `Feishu API error on ${method} ${url.pathname}: code=${payload.code} msg=${payload.msg ?? response.statusText}`,
+        `Feishu API error on ${method} ${url.pathname}: code=${payload.code} msg=${payload.msg ?? response.status}`,
         { code: payload.code, httpStatus: response.status, requestId },
       );
     }
