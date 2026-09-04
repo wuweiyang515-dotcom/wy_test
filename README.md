@@ -60,8 +60,11 @@ Copilot 的沙箱默认屏蔽外网域名，飞书域名必须显式放行，否
 `.github/workflows/copilot-setup-steps.yml` 会在每次 Copilot 会话开始前安装 Node.js 20 并把 `feishu`
 命令链接到 PATH，做到开箱即用。
 
-飞书官方并没有通用的「文档读写 CLI」，因此这里基于官方 OpenAPI 自行封装了一个薄壳。它只使用 Node.js 内置的
-`fetch`，没有任何第三方运行时依赖。
+飞书官方并没有通用的「文档读写 CLI」，因此这里基于官方 OpenAPI 自行封装了一个薄壳。它只使用 Node.js 内置模块，
+没有任何第三方运行时依赖。
+
+> 网络实现说明：客户端使用 `node:https` 而不是全局 `fetch`。Copilot 沙箱的出网代理会让 undici（`fetch` 的底层实现）
+> 发出的请求被飞书 CDN 以一段 HTML 形式的 `400 Bad Request` 拒绝，改用内置 `https` 模块后即可正常访问。
 
 ## 目录结构
 
