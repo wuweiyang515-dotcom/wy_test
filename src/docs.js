@@ -86,30 +86,49 @@ export async function listBlocks(client, target) {
   return blocks;
 }
 
-/** Build docx text blocks (block_type 2 = paragraph) from plain text lines. */
+/**
+ * Build docx text blocks (block_type 2 = paragraph) from plain text lines.
+ *
+ * The API rejects paragraphs with an empty `elements` array, so blank lines are
+ * represented by a paragraph holding a single empty text run.
+ */
 function textBlocks(text) {
   return text.replace(/\r\n/g, '\n').split('\n').map((line) => ({
     block_type: 2,
     text: {
-      elements: line === '' ? [] : [{ text_run: { content: line } }],
+      elements: [{ text_run: { content: line === '' ? ' ' : line } }],
       style: {},
     },
   }));
 }
 
+/** The docx API rejects requests that create more than 50 children at once. */
+const MAX_CHILDREN_PER_REQUEST = 50;
+
 /**
  * Append plain text to a docx document, as one paragraph per line.
+ *
+ * Long texts are split into several requests to stay within the API's limit on
+ * the number of children created per call.
  *
  * @param {string} [parentBlockId] defaults to the document root block
  */
 export async function appendText(client, target, text, parentBlockId) {
   assertDocx(target, 'append content');
   const parent = parentBlockId || target.token; // the root block id equals the document id
-  const data = await client.request(
-    `/open-apis/docx/v1/documents/${target.token}/blocks/${parent}/children`,
-    { method: 'POST', body: { children: textBlocks(text), index: -1 } },
-  );
-  return data.children ?? [];
+  const blocks = textBlocks(text);
+  const created = [];
+  for (let start = 0; start < blocks.length; start += MAX_CHILDREN_PER_REQUEST) {
+    const data = await client.request(
+      `/open-apis/docx/v1/documents/${target.token}/blocks/${parent}/children`,
+      {
+        method: 'POST',
+        body: { children: blocks.slice(start, start + MAX_CHILDREN_PER_REQUEST), index: -1 },
+      },
+    );
+    created.push(...(data.children ?? []));
+  }
+  return created;
 }
 
 /** Replace the text of a single existing block. */
