@@ -7,6 +7,7 @@
  *   feishu resolve <link>
  *   feishu read <link> [--blocks] [--json]
  *   feishu append <link> (--text <text> | --file <path>) [--parent <block_id>]
+ *   feishu replace <link> (--text <text> | --file <path>) [--parent <block_id>]
  *   feishu update <link> --block <block_id> (--text <text> | --file <path>)
  *   feishu create --title <title> [--folder <folder_token>] [--text <text> | --file <path>]
  */
@@ -22,6 +23,7 @@ import {
   getTitle,
   listBlocks,
   readRawContent,
+  replaceContent,
   resolveLink,
   updateBlockText,
 } from './docs.js';
@@ -38,6 +40,10 @@ Commands:
     --text <text>        Text to append.
     --file <path>        Read the text from a file ("-" for stdin).
     --parent <block_id>  Parent block to append to (defaults to the document root).
+  replace <link>         Replace the entire content of a docx document.
+    --text <text>        New content.
+    --file <path>        Read the new content from a file ("-" for stdin).
+    --parent <block_id>  Block whose children are replaced (defaults to the document root).
   update <link>          Replace the text of one block.
     --block <block_id>   Block to update (required).
     --text/--file        New text.
@@ -140,6 +146,18 @@ async function commandAppend(client, positional, flags) {
   console.log(`Appended ${children.length} block(s) to ${target.token}.`);
 }
 
+async function commandReplace(client, positional, flags) {
+  const target = await resolveLink(client, requireLink(positional));
+  const text = resolveText(flags);
+  const { deleted, created } = await replaceContent(
+    client,
+    target,
+    text,
+    typeof flags.parent === 'string' ? flags.parent : undefined,
+  );
+  console.log(`Replaced ${deleted} block(s) with ${created} block(s) in ${target.token}.`);
+}
+
 async function commandUpdate(client, positional, flags) {
   if (typeof flags.block !== 'string') {
     throw new FeishuError('--block <block_id> is required (use `read --blocks` to find it).');
@@ -193,6 +211,9 @@ async function main(argv) {
       break;
     case 'append':
       await commandAppend(client, positional, flags);
+      break;
+    case 'replace':
+      await commandReplace(client, positional, flags);
       break;
     case 'update':
       await commandUpdate(client, positional, flags);

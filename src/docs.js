@@ -6,6 +6,9 @@
 import { FeishuClient, FeishuError } from './client.js';
 import { parseFeishuLink } from './url.js';
 
+/** The docx API accepts at most 50 child blocks per create/delete call. */
+const MAX_CHILDREN_PER_CALL = 50;
+
 /**
  * Resolve a share link to a concrete object. Wiki links are resolved to the
  * underlying object (`obj_type` / `obj_token`) with one extra API call.
@@ -86,12 +89,17 @@ export async function listBlocks(client, target) {
   return blocks;
 }
 
-/** Build docx text blocks (block_type 2 = paragraph) from plain text lines. */
+/**
+ * Build docx text blocks (block_type 2 = paragraph) from plain text lines.
+ *
+ * Blank lines still need a `text_run`: the API rejects an empty `elements`
+ * array with `invalid param`.
+ */
 function textBlocks(text) {
   return text.replace(/\r\n/g, '\n').split('\n').map((line) => ({
     block_type: 2,
     text: {
-      elements: line === '' ? [] : [{ text_run: { content: line } }],
+      elements: [{ text_run: { content: line } }],
       style: {},
     },
   }));
@@ -100,16 +108,63 @@ function textBlocks(text) {
 /**
  * Append plain text to a docx document, as one paragraph per line.
  *
+ * The API accepts at most 50 children per call, so longer content is sent in
+ * successive batches.
+ *
  * @param {string} [parentBlockId] defaults to the document root block
  */
 export async function appendText(client, target, text, parentBlockId) {
   assertDocx(target, 'append content');
   const parent = parentBlockId || target.token; // the root block id equals the document id
-  const data = await client.request(
-    `/open-apis/docx/v1/documents/${target.token}/blocks/${parent}/children`,
-    { method: 'POST', body: { children: textBlocks(text), index: -1 } },
-  );
-  return data.children ?? [];
+  const blocks = textBlocks(text);
+  const created = [];
+
+  for (let offset = 0; offset < blocks.length; offset += MAX_CHILDREN_PER_CALL) {
+    const batch = blocks.slice(offset, offset + MAX_CHILDREN_PER_CALL);
+    const data = await client.request(
+      `/open-apis/docx/v1/documents/${target.token}/blocks/${parent}/children`,
+      { method: 'POST', body: { children: batch, index: -1 } },
+    );
+    created.push(...(data.children ?? []));
+  }
+
+  return created;
+}
+
+/**
+ * Delete every child of a docx block (defaults to the document root), leaving
+ * the document empty but preserving its title.
+ *
+ * @param {string} [parentBlockId] defaults to the document root block
+ * @returns {Promise<number>} how many blocks were removed
+ */
+export async function deleteChildren(client, target, parentBlockId) {
+  assertDocx(target, 'delete content');
+  const parent = parentBlockId || target.token;
+  const blocks = await listBlocks(client, target);
+  const root = blocks.find((block) => block.block_id === parent);
+  const count = root?.children?.length ?? 0;
+
+  // Delete from the end so the indexes of the not-yet-deleted blocks stay valid.
+  for (let end = count; end > 0; end -= MAX_CHILDREN_PER_CALL) {
+    const start = Math.max(0, end - MAX_CHILDREN_PER_CALL);
+    await client.request(
+      `/open-apis/docx/v1/documents/${target.token}/blocks/${parent}/children/batch_delete`,
+      { method: 'DELETE', body: { start_index: start, end_index: end } },
+    );
+  }
+  return count;
+}
+
+/**
+ * Replace the whole content of a docx document with plain text.
+ *
+ * @returns {Promise<{ deleted: number, created: number }>}
+ */
+export async function replaceContent(client, target, text, parentBlockId) {
+  const deleted = await deleteChildren(client, target, parentBlockId);
+  const children = await appendText(client, target, text, parentBlockId);
+  return { deleted, created: children.length };
 }
 
 /** Replace the text of a single existing block. */
@@ -119,7 +174,7 @@ export async function updateBlockText(client, target, blockId, text) {
     method: 'PATCH',
     body: {
       update_text_elements: {
-        elements: text === '' ? [] : [{ text_run: { content: text } }],
+        elements: [{ text_run: { content: text } }],
       },
     },
   });

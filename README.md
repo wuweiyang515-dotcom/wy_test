@@ -9,6 +9,7 @@ feishu check                                  # 自检：只验证凭证与网�
 feishu check https://xxx.feishu.cn/docx/AbC…  # 自检：再读一次文档标题，验证权限
 feishu read https://xxx.feishu.cn/wiki/AbC…   # 读取正文（wiki 链接会自动解析到真实文档）
 feishu append <链接> --text "一行内容"         # 追加段落
+feishu replace <链接> --file content.txt      # 用新内容整体替换正文
 feishu update <链接> --block <block_id> --text "新内容"
 feishu create --title "新文档" --folder <文件夹链接或 token> --text "初始内容"
 ```
@@ -60,8 +61,11 @@ Copilot 的沙箱默认屏蔽外网域名，飞书域名必须显式放行，否
 `.github/workflows/copilot-setup-steps.yml` 会在每次 Copilot 会话开始前安装 Node.js 20 并把 `feishu`
 命令链接到 PATH，做到开箱即用。
 
-飞书官方并没有通用的「文档读写 CLI」，因此这里基于官方 OpenAPI 自行封装了一个薄壳。它只使用 Node.js 内置的
-`fetch`，没有任何第三方运行时依赖。
+飞书官方并没有通用的「文档读写 CLI」，因此这里基于官方 OpenAPI 自行封装了一个薄壳。它只使用 Node.js 内置模块，
+没有任何第三方运行时依赖。
+
+> 注意：请求走 `node:https` 而不是全局 `fetch`。`open.feishu.cn` 前面的 CDN 会以一段 HTML 格式的
+> `400 Bad Request` 拒绝 undici（`fetch` 的底层实现）发出的请求，而字节等价的 `node:https` 请求可以正常返回。
 
 ## 目录结构
 
