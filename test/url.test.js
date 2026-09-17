@@ -57,3 +57,15 @@ test('rejects non-Feishu hosts and unparseable links', () => {
 test('is not fooled by a lookalike host', () => {
   assert.throws(() => parseFeishuLink('https://feishu.cn.evil.com/docx/Abc123XyZ890'), /Not a Feishu/);
 });
+
+test('picks up the active sheet id from the query string or hash', () => {
+  assert.equal(
+    parseFeishuLink('https://acme.feishu.cn/sheets/Abc123XyZ890?sheet=266625').sheetId,
+    '266625',
+  );
+  assert.equal(
+    parseFeishuLink('https://acme.feishu.cn/wiki/Abc123XyZ890#sheet=abc123').sheetId,
+    'abc123',
+  );
+  assert.equal(parseFeishuLink('https://acme.feishu.cn/sheets/Abc123XyZ890').sheetId, undefined);
+});

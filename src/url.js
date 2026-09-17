@@ -27,8 +27,23 @@ const PATH_TYPES = new Map([
 const TOKEN_PATTERN = /^[A-Za-z0-9]{10,64}$/;
 
 /**
+ * Spreadsheet links carry the active tab in the query string or the hash, e.g.
+ * `?sheet=266625` or `#sheet=266625`. Returns the sheet id when present.
+ *
+ * @param {URL} url
+ * @returns {string | undefined}
+ */
+function extractSheetId(url) {
+  const fromQuery = url.searchParams.get('sheet');
+  if (fromQuery) return fromQuery;
+  const hash = url.hash.replace(/^#/, '');
+  if (!hash) return undefined;
+  return new URLSearchParams(hash).get('sheet') ?? undefined;
+}
+
+/**
  * @param {string} link a Feishu share link, or a bare document token
- * @returns {{ type: string, token: string, host: string | null }}
+ * @returns {{ type: string, token: string, host: string | null, sheetId?: string }}
  */
 export function parseFeishuLink(link) {
   if (typeof link !== 'string' || link.trim() === '') {
@@ -56,6 +71,7 @@ export function parseFeishuLink(link) {
   }
 
   const segments = url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+  const sheetId = extractSheetId(url);
 
   // /drive/folder/<token>
   if (segments[0] === 'drive' && segments[1] === 'folder' && segments[2]) {
@@ -71,7 +87,7 @@ export function parseFeishuLink(link) {
     const type = PATH_TYPES.get(segments[i]);
     const token = segments[i + 1];
     if (type && TOKEN_PATTERN.test(token)) {
-      return { type, token, host: url.hostname };
+      return { type, token, host: url.hostname, ...(sheetId ? { sheetId } : {}) };
     }
   }
 
