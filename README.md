@@ -11,6 +11,8 @@ feishu read https://xxx.feishu.cn/wiki/AbC…   # 读取正文（wiki 链接会�
 feishu append <链接> --text "一行内容"         # 追加段落
 feishu update <链接> --block <block_id> --text "新内容"
 feishu create --title "新文档" --folder <文件夹链接或 token> --text "初始内容"
+feishu sheets <表格链接>                       # 列出电子表格的所有页签
+feishu sheet <表格链接> --tab "点击分析"        # 读取指定页签的单元格（TSV 输出）
 ```
 
 不带参数运行 `feishu help` 可查看完整用法。
@@ -74,6 +76,7 @@ Copilot 的沙箱默认屏蔽外网域名，飞书域名必须显式放行，否
 | `src/url.js`      | 飞书链接解析：识别 docx / docs / sheets / base / wiki / 文件夹 |
 | `src/client.js`   | OpenAPI 客户端：`tenant_access_token` 获取与缓存、错误处理   |
 | `src/docs.js`     | 文档操作：wiki 解析、读取、追加、更新、新建                  |
+| `src/sheets.js`   | 电子表格操作：列出页签、按范围分块读取单元格                 |
 | `test/`           | 链接解析的单元测试（不联网）                                |
 
 ## 开发

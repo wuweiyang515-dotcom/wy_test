@@ -14,6 +14,7 @@ import { parseFeishuLink } from './url.js';
  */
 export async function resolveLink(client, link) {
   const parsed = parseFeishuLink(link);
+  const sheetId = parsed.sheetId ? { sheetId: parsed.sheetId } : {};
 
   if (parsed.type === 'wiki') {
     const data = await client.request('/open-apis/wiki/v2/spaces/get_node', {
@@ -23,10 +24,10 @@ export async function resolveLink(client, link) {
     if (!node) {
       throw new FeishuError(`Wiki node not found for token ${parsed.token}.`);
     }
-    return { type: node.obj_type, token: node.obj_token, wikiToken: parsed.token };
+    return { type: node.obj_type, token: node.obj_token, wikiToken: parsed.token, ...sheetId };
   }
 
-  return { type: parsed.type, token: parsed.token };
+  return { type: parsed.type, token: parsed.token, ...sheetId };
 }
 
 function assertDocx(target, action) {

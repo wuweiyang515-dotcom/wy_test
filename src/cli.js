@@ -25,6 +25,7 @@ import {
   resolveLink,
   updateBlockText,
 } from './docs.js';
+import { findSheet, listSheets, readSheetValues } from './sheets.js';
 
 const USAGE = `feishu - read, append to and create Feishu (Lark) cloud documents.
 
@@ -45,6 +46,12 @@ Commands:
     --title <title>      Document title (required).
     --folder <token>     Target folder token, or a folder link.
     --text/--file        Optional initial content.
+  sheets <link>          List the tabs of a spreadsheet.
+  sheet <link>           Print the cell values of one spreadsheet tab as TSV.
+    --tab <id|title>     Tab to read (defaults to the tab in the link, else the first one).
+    --max-rows <n>       Stop after n rows (default 200).
+    --max-columns <n>    Stop after n columns (default 40).
+    --json               Print a JSON matrix instead of TSV.
 
 Environment:
   FEISHU_APP_ID, FEISHU_APP_SECRET   Credentials of a Feishu custom app (required).
@@ -170,6 +177,38 @@ async function commandCreate(client, flags) {
   }
 }
 
+async function commandSheets(client, positional) {
+  const target = await resolveLink(client, requireLink(positional));
+  const sheets = await listSheets(client, target);
+  for (const sheet of sheets) {
+    console.log(`${sheet.sheetId}\t${sheet.title}\t${sheet.rowCount}x${sheet.columnCount}`);
+  }
+}
+
+function positiveInt(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+async function commandSheet(client, positional, flags) {
+  const target = await resolveLink(client, requireLink(positional));
+  const wanted = typeof flags.tab === 'string' ? flags.tab : target.sheetId;
+  const sheet = await findSheet(client, target, wanted);
+  const rows = await readSheetValues(client, target, sheet, {
+    maxRows: positiveInt(flags['max-rows'], 200),
+    maxColumns: positiveInt(flags['max-columns'], 40),
+  });
+
+  if (flags.json) {
+    console.log(JSON.stringify({ sheet, rows }, null, 2));
+    return;
+  }
+  console.error(`# ${sheet.title} (${sheet.sheetId}) - ${rows.length} row(s)`);
+  for (const row of rows) {
+    console.log(row.join('\t'));
+  }
+}
+
 async function main(argv) {
   const { positional, flags } = parseArgs(argv);
   const command = positional.shift();
@@ -199,6 +238,12 @@ async function main(argv) {
       break;
     case 'create':
       await commandCreate(client, flags);
+      break;
+    case 'sheets':
+      await commandSheets(client, positional);
+      break;
+    case 'sheet':
+      await commandSheet(client, positional, flags);
       break;
     default:
       console.error(`Unknown command: ${command}\n`);
