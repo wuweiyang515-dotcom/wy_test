@@ -35,6 +35,7 @@ import argparse
 import sys
 from collections import defaultdict
 from datetime import timedelta
+from pathlib import Path
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -158,8 +159,10 @@ class SheetWriter:
     def __init__(self, workbook, title):
         self.ws = workbook.create_sheet(title)
         self.widths = defaultdict(int)
+        self.rows = []  # 同步留存一份纯文本，便于导出 TSV 写入飞书
 
     def _track(self, values):
+        self.rows.append(["" if v is None else v for v in values])
         for idx, value in enumerate(values, start=1):
             text = "" if value is None else str(value)
             # 中文按两个字符宽度估算
@@ -173,6 +176,7 @@ class SheetWriter:
 
     def blank(self):
         self.ws.append([])
+        self.rows.append([])
 
     def section(self, text):
         self.ws.append([text])
@@ -195,6 +199,11 @@ class SheetWriter:
     def finish(self):
         for idx, width in self.widths.items():
             self.ws.column_dimensions[get_column_letter(idx)].width = max(10, width)
+        return self
+
+    def to_tsv(self):
+        """纯文本形式，供 `feishu sheet-write` 写入飞书表格。"""
+        return "\n".join("\t".join(str(v) for v in row) for row in self.rows)
 
 
 def r2(value):
@@ -271,8 +280,7 @@ def write_analysis_sheet(wb, *, metric, rows, groups, url_counts, kw_by_url, per
         writer.blank()
 
     if not is_click:
-        writer.finish()
-        return
+        return writer.finish()
 
     # ---- 四、关键词维度归因分解 ----
     writer.section(f"四、关键词维度归因分解（点击提升/下降 TOP{top_n // 2} URL）")
@@ -310,7 +318,7 @@ def write_analysis_sheet(wb, *, metric, rows, groups, url_counts, kw_by_url, per
                  r4(k["d_ctr"]), r2(k["cur_rank"]), r2(k["prev_rank"])]
             )
         writer.blank()
-    writer.finish()
+    return writer.finish()
 
 
 def write_notes_sheet(wb, periods, root_prefix, top_n, kw_top):
@@ -339,7 +347,7 @@ def write_notes_sheet(wb, periods, root_prefix, top_n, kw_top):
         ("关键词排序", "按点击变化绝对值降序，其次按展现变化绝对值降序"),
     ]:
         writer.row([item, text])
-    writer.finish()
+    return writer.finish()
 
 
 # --------------------------------------------------------------------------- #
@@ -353,6 +361,7 @@ def main():
     parser.add_argument("--top", type=int, default=10, help="升/降榜各取多少条 URL")
     parser.add_argument("--kw-top", type=int, default=15, help="每个 URL 展开多少个关键词")
     parser.add_argument("--out", required=True, help="输出 Excel 路径")
+    parser.add_argument("--tsv-dir", help="可选：把每个页签同时导出为 TSV，便于写入飞书表格")
     args = parser.parse_args()
 
     cur_start = parse_date(args.week_start)
@@ -395,8 +404,9 @@ def main():
 
     wb = Workbook()
     wb.remove(wb.active)
+    writers = {}
     for metric in ("click", "impression"):
-        write_analysis_sheet(
+        writer = write_analysis_sheet(
             wb,
             metric=metric,
             rows=rows,
@@ -407,8 +417,17 @@ def main():
             top_n=args.top,
             kw_top=args.kw_top,
         )
-    write_notes_sheet(wb, periods, root, args.top, args.kw_top)
+        writers[writer.ws.title] = writer
+    notes = write_notes_sheet(wb, periods, root, args.top, args.kw_top)
+    writers[notes.ws.title] = notes
     wb.save(args.out)
+
+    if args.tsv_dir:
+        tsv_dir = Path(args.tsv_dir)
+        tsv_dir.mkdir(parents=True, exist_ok=True)
+        for name, writer in writers.items():
+            (tsv_dir / f"{name}.tsv").write_text(writer.to_tsv() + "\n", encoding="utf-8")
+        print(f"TSV 已输出到：{tsv_dir}")
 
     root_rows = groups[ROOT_GROUP]
     print(f"本期 {cur_start}~{cur_end} vs 对比期 {prev_start}~{prev_end}")

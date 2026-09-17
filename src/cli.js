@@ -25,7 +25,7 @@ import {
   resolveLink,
   updateBlockText,
 } from './docs.js';
-import { findSheet, listSheets, readSheetValues } from './sheets.js';
+import { clearSheet, ensureSheet, findSheet, listSheets, readSheetValues, writeSheetValues } from './sheets.js';
 
 const USAGE = `feishu - read, append to and create Feishu (Lark) cloud documents.
 
@@ -52,6 +52,10 @@ Commands:
     --max-rows <n>       Stop after n rows (default 200).
     --max-columns <n>    Stop after n columns (default 40).
     --json               Print a JSON matrix instead of TSV.
+  sheet-write <link>     Write TSV into a spreadsheet tab, starting at A1.
+    --tab <id|title>     Tab to write to; created when missing (defaults to the link's tab).
+    --file <path>        TSV to write ("-" for stdin).
+    --clear              Blank the tab before writing.
 
 Environment:
   FEISHU_APP_ID, FEISHU_APP_SECRET   Credentials of a Feishu custom app (required).
@@ -209,6 +213,25 @@ async function commandSheet(client, positional, flags) {
   }
 }
 
+async function commandSheetWrite(client, positional, flags) {
+  const target = await resolveLink(client, requireLink(positional));
+  const wanted = typeof flags.tab === 'string' ? flags.tab : target.sheetId;
+  const sheet = wanted
+    ? await ensureSheet(client, target, wanted).catch(() => findSheet(client, target, wanted))
+    : await findSheet(client, target, undefined);
+
+  const text = resolveText(flags);
+  const matrix = text
+    .replace(/\r\n/g, '\n')
+    .replace(/\n$/, '')
+    .split('\n')
+    .map((line) => line.split('\t'));
+
+  if (flags.clear) await clearSheet(client, target, sheet);
+  const written = await writeSheetValues(client, target, sheet, matrix);
+  console.log(`Wrote ${written} row(s) to "${sheet.title}" (${sheet.sheetId}).`);
+}
+
 async function main(argv) {
   const { positional, flags } = parseArgs(argv);
   const command = positional.shift();
@@ -244,6 +267,9 @@ async function main(argv) {
       break;
     case 'sheet':
       await commandSheet(client, positional, flags);
+      break;
+    case 'sheet-write':
+      await commandSheetWrite(client, positional, flags);
       break;
     default:
       console.error(`Unknown command: ${command}\n`);

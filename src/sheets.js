@@ -126,3 +126,109 @@ export async function readSheetValues(client, target, sheet, options = {}) {
   }
   return matrix;
 }
+
+/**
+ * Create a tab, or return the existing one when a tab with that title is
+ * already present, so that writing a report twice does not pile up duplicates.
+ *
+ * @param {{ index?: number, rowCount?: number, columnCount?: number }} [options]
+ */
+export async function ensureSheet(client, target, title, options = {}) {
+  assertSheet(target, 'create a tab');
+  const existing = (await listSheets(client, target)).find(
+    (sheet) => (sheet.title ?? '').trim() === String(title).trim(),
+  );
+  if (existing) return existing;
+
+  const properties = { title };
+  if (options.index !== undefined) properties.index = options.index;
+  const data = await client.request(
+    `/open-apis/sheets/v2/spreadsheets/${target.token}/sheets_batch_update`,
+    { method: 'POST', body: { requests: [{ addSheet: { properties } }] } },
+  );
+  const created = data.replies?.[0]?.addSheet?.properties;
+  if (!created?.sheetId) {
+    throw new FeishuError(`Could not create the tab "${title}".`);
+  }
+  return {
+    sheetId: created.sheetId,
+    title: created.title ?? title,
+    index: created.index,
+    rowCount: created.rowCount,
+    columnCount: created.columnCount,
+  };
+}
+
+/** Grow a tab so that it can hold `rows` x `columns` cells before writing. */
+async function ensureCapacity(client, target, sheet, rows, columns) {
+  const requests = [];
+  if (sheet.rowCount !== undefined && rows > sheet.rowCount) {
+    requests.push({ dimension: { sheetId: sheet.sheetId, majorDimension: 'ROWS' }, length: rows - sheet.rowCount });
+  }
+  if (sheet.columnCount !== undefined && columns > sheet.columnCount) {
+    requests.push({
+      dimension: { sheetId: sheet.sheetId, majorDimension: 'COLUMNS' },
+      length: columns - sheet.columnCount,
+    });
+  }
+  for (const body of requests) {
+    await client.request(`/open-apis/sheets/v2/spreadsheets/${target.token}/dimension_range`, {
+      method: 'POST',
+      body,
+    });
+  }
+}
+
+/** Remove every value currently present in a tab. */
+export async function clearSheet(client, target, sheet) {
+  assertSheet(target, 'clear a tab');
+  const columns = sheet.columnCount ?? 20;
+  const rows = sheet.rowCount ?? 200;
+  if (rows < 1 || columns < 1) return;
+  await client.request(`/open-apis/sheets/v2/spreadsheets/${target.token}/values_batch_update`, {
+    method: 'POST',
+    body: {
+      valueRanges: [
+        {
+          range: `${sheet.sheetId}!A1:${columnLetter(columns)}${rows}`,
+          values: Array.from({ length: rows }, () => Array.from({ length: columns }, () => '')),
+        },
+      ],
+    },
+  });
+}
+
+/**
+ * Write a matrix of values starting at A1, in chunks to stay within the API's
+ * per-call cell limit. Rows may be ragged; they are padded to the widest row.
+ *
+ * @param {(string | number | null)[][]} matrix
+ */
+export async function writeSheetValues(client, target, sheet, matrix) {
+  assertSheet(target, 'write values');
+  if (matrix.length === 0) return 0;
+
+  const columns = Math.max(...matrix.map((row) => row.length), 1);
+  const padded = matrix.map((row) => {
+    const copy = row.map((cell) => (cell === undefined || cell === null ? '' : cell));
+    while (copy.length < columns) copy.push('');
+    return copy;
+  });
+
+  await ensureCapacity(client, target, sheet, padded.length, columns);
+
+  const lastColumn = columnLetter(columns);
+  const rowsPerChunk = Math.max(1, Math.floor(MAX_CELLS_PER_REQUEST / columns));
+  for (let start = 0; start < padded.length; start += rowsPerChunk) {
+    const chunk = padded.slice(start, start + rowsPerChunk);
+    const firstRow = start + 1;
+    const lastRow = start + chunk.length;
+    await client.request(`/open-apis/sheets/v2/spreadsheets/${target.token}/values_batch_update`, {
+      method: 'POST',
+      body: {
+        valueRanges: [{ range: `${sheet.sheetId}!A${firstRow}:${lastColumn}${lastRow}`, values: chunk }],
+      },
+    });
+  }
+  return padded.length;
+}
